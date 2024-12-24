@@ -3,9 +3,128 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hello World UPDATED</title>
+    <title>PeerJS File Transfer</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
-    Hello, World!
+    <h1>PeerJS File Transfer</h1>
+    
+    <h3>Send a File:</h3>
+    <input type="file" id="fileInput">
+    <button onclick="sendFile()">Send File</button>
+
+    <h3>Progress:</h3>
+    <progress id="progressBar" value="0" max="100" style="width: 100%;"></progress>
+
+    <h3>Received File:</h3>
+    <div id="receivedFile"></div>
+
+    <h3>Peer ID:</h3>
+    <div id="peerId"></div>
+
+    <h3>Other Peer ID:</h3>
+    <input type="text" id="otherPeerId" placeholder="Enter Peer ID">
+    <button onclick="connectToPeer()">Connect to Peer</button>
+
+    <script>
+        const CHUNK_SIZE = 16 * 1024; // 16 KB per chunk
+        const peer = new Peer();
+        let connection = null;
+        let receivedChunks = [];
+        let totalChunks = 0;
+        let sentChunks = 0;
+
+        // Display the Peer ID
+        peer.on('open', function(id) {
+            document.getElementById('peerId').innerText = 'Your Peer ID: ' + id;
+        });
+
+        // Handle incoming connection
+        peer.on('connection', function(conn) {
+            connection = conn;
+            connection.on('data', function(data) {
+                if (data.type === 'meta') {
+                    console.log('Receiving file metadata:', data);
+                    totalChunks = data.totalChunks;
+                    receivedChunks = [];
+                } else if (data.type === 'chunk') {
+                    receivedChunks.push(data.chunk);
+                    console.log(`Received chunk ${receivedChunks.length}/${totalChunks}`);
+                    
+                    // Update progress bar
+                    const progressBar = document.getElementById('progressBar');
+                    const progress = (receivedChunks.length / totalChunks) * 100;
+                    progressBar.value = progress;
+
+                    // When all chunks are received
+                    if (receivedChunks.length === totalChunks) {
+                        const blob = new Blob(receivedChunks);
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = data.fileName;
+                        link.textContent = `Download ${data.fileName}`;
+                        document.getElementById('receivedFile').appendChild(link);
+                        progressBar.value = 100; // Complete
+                    }
+                }
+            });
+        });
+
+        // Connect to another peer
+        function connectToPeer() {
+            const otherPeerId = document.getElementById('otherPeerId').value;
+            const conn = peer.connect(otherPeerId);
+            conn.on('open', function() {
+                connection = conn;
+                console.log('Connected to peer: ', otherPeerId);
+            });
+        }
+
+        // Send file chunks with progress update
+        function sendFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const progressBar = document.getElementById('progressBar');
+
+            if (!file || !connection) {
+                alert('No file selected or no connection established!');
+                return;
+            }
+
+            console.log('Sending file metadata:', file.name, file.size);
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            connection.send({ type: 'meta', fileName: file.name, totalChunks });
+
+            const reader = new FileReader();
+            let offset = 0;
+
+            reader.onload = function(event) {
+                connection.send({ type: 'chunk', chunk: event.target.result, fileName: file.name });
+                offset += CHUNK_SIZE;
+                sentChunks++;
+                
+                // Update progress bar
+                const progress = (sentChunks / totalChunks) * 100;
+                progressBar.value = progress;
+
+                if (offset < file.size) {
+                    readNextChunk();
+                } else {
+                    console.log('File sent successfully!');
+                    progressBar.value = 100; // Complete
+                }
+            };
+
+            function readNextChunk() {
+                const slice = file.slice(offset, offset + CHUNK_SIZE);
+                reader.readAsArrayBuffer(slice);
+            }
+
+            sentChunks = 0; // Reset sent chunks counter
+            progressBar.value = 0; // Reset progress bar
+            readNextChunk();
+        }
+    </script>
 </body>
 </html>
